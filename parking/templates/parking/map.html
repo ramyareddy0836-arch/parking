@@ -194,6 +194,11 @@
                                 </button>
                             </template>
                         </div>
+                        <div x-show="slots.length === 0" class="py-12 text-center glass-panel rounded-2xl border-2 border-dashed border-slate-200">
+                             <div class="w-12 h-12 rounded-full bg-slate-100 mx-auto flex items-center justify-center text-slate-300 mb-3"><i class="fa-solid fa-ghost"></i></div>
+                             <p class="text-sm font-bold text-slate-400 uppercase tracking-widest">No matching slots in this node</p>
+                             <p class="text-[10px] text-slate-400 mt-1">Try another vehicle protocol or location.</p>
+                        </div>
                     </div>
                 </div>
             </template>
@@ -205,22 +210,59 @@
         <div x-show="bookingModalOpen" x-transition.opacity class="absolute inset-0 bg-slate-50/80 backdrop-blur-md pointer-events-auto" @click="bookingModalOpen = false"></div>
         <div x-show="bookingModalOpen" x-transition class="glass-panel w-full max-w-sm rounded-[2rem] pointer-events-auto flex flex-col border border-slate-300 relative overflow-hidden shadow-2xl"
              x-data="{
-                step: 1, duration: 1, date: new Date().toISOString().split('T')[0], time: '12:00',
-                get totalPrice() { return (selectedLoc?.base_price * this.duration).toFixed(2); },
+                step: 1, duration: 1, evSelected: false,
+                get totalPrice() { 
+                    let price = (selectedLoc?.base_price * this.duration);
+                    if(this.evSelected) price += 50;
+                    return price.toFixed(2); 
+                },
                 async submitTransaction() {
                     this.step = 3; 
-                    selectedSlot.is_available = false;
-                    if(selectedLoc.available_slots_count > 0) { selectedLoc.available_slots_count--; $dispatch('re-render-map'); }
-                    window._mockBookingActive = true;
-                    window._mockBookingSlot = selectedSlot.slot_number;
-                    window._mockBookingPrice = this.totalPrice;
-                    window._mockBookingLat = selectedLoc.lat;
-                    window._mockBookingLng = selectedLoc.lng;
-                    window._mockBookingLocName = selectedLoc.name;
-                    window.dispatchEvent(new CustomEvent('update-booking'));
-                    setTimeout(() => { bookingModalOpen = false; this.step = 1; detailOpen = false; }, 2500);
+                    try {
+                        const csrfToken = document.cookie.split('; ').find(row => row.startsWith('csrftoken='))?.split('=')[1];
+                        const response = await fetch('/api/bookings/create/', {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': csrfToken
+                            },
+                            body: JSON.stringify({
+                                slot_id: selectedSlot.id,
+                                duration: this.duration,
+                                is_ev_selected: this.evSelected,
+                                // For virtual slots generated from city search, send full data so backend can persist them
+                                virtual_slot_data: String(selectedSlot.id).startsWith('v-') ? {
+                                    slot_number: selectedSlot.slot_number,
+                                    vehicle_type: selectedSlot.vehicle_type,
+                                    is_ev_slot: selectedSlot.is_ev_slot
+                                } : null,
+                                virtual_location_data: String(selectedSlot.id).startsWith('v-') ? {
+                                    name: selectedLoc?.name,
+                                    address: selectedLoc?.address,
+                                    lat: selectedLoc?.lat,
+                                    lng: selectedLoc?.lng,
+                                    total_slots: selectedLoc?.total_slots,
+                                    base_price: selectedLoc?.base_price,
+                                    has_ev_charging: selectedLoc?.has_ev_charging
+                                } : null
+                            })
+                        });
+                        const res = await response.json();
+                        if (res.status === 'success') {
+                            window.dispatchEvent(new CustomEvent('notify', {detail: 'Booking confirmed!'}));
+                            // Refresh data
+                            $dispatch('re-render-map');
+                            setTimeout(() => { window.location.href = '/dashboard/'; }, 2000);
+                        } else {
+                            alert(res.message);
+                            this.step = 1;
+                        }
+                    } catch(e) {
+                         alert('Error confirming booking.');
+                         this.step = 1;
+                    }
                 }
-             }" @open-booking.window="step = 1; duration = 1;">
+             }" @open-booking.window="step = 1; duration = 1; evSelected = false;">
              
              <div x-show="step===1" class="p-8">
                 <div class="text-center mb-8">
@@ -236,6 +278,17 @@
                             <button @click="duration++" class="w-10 h-10 text-slate-600 hover:text-slate-900 hover:bg-slate-900/5 rounded-lg transition"><i class="fa-solid fa-plus"></i></button>
                         </div>
                     </div>
+
+                    <div x-show="selectedLoc?.has_ev_charging">
+                        <label class="text-[10px] text-gray-500 uppercase tracking-widest font-semibold block mb-2">EV Charging Support</label>
+                        <button @click="evSelected = !evSelected" 
+                                class="w-full flex items-center justify-between p-4 rounded-xl border transition-all"
+                                :class="evSelected ? 'bg-secondary/10 border-secondary text-secondary' : 'bg-slate-100 border-slate-200 text-slate-500'">
+                            <span class="text-sm font-bold flex items-center gap-2"><i class="fa-solid fa-bolt"></i> Need EV Charge?</span>
+                            <i class="fa-solid text-lg" :class="evSelected ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
+                        </button>
+                        <p x-show="evSelected" class="text-[10px] text-secondary font-bold mt-1 text-center">+ ₹50.00 Charging Fee</p>
+                    </div>
                 </div>
                 <div class="flex justify-between items-end mb-8 bg-slate-900/50 p-4 rounded-xl border border-slate-200">
                     <span class="text-[10px] text-gray-500 uppercase tracking-widest font-semibold">Total Cost</span>
@@ -249,22 +302,40 @@
                     <h2 class="text-xl font-bold text-slate-900 tracking-tight">Select Payment</h2>
                 </div>
                 <div class="flex flex-col gap-3 mb-8">
-                    <button class="glass-panel p-4 border border-primary/50 text-slate-900 text-sm font-medium rounded-xl flex items-center justify-between group hover:bg-primary/10 transition"><span class="flex items-center gap-3"><i class="fa-solid fa-building-columns text-primary"></i> UPI / Net Banking</span> <i class="fa-solid fa-chevron-right text-gray-600 group-hover:text-primary transition"></i></button>
-                    <button class="bg-white p-4 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl flex items-center justify-between"><span class="flex items-center gap-3"><i class="fa-solid fa-wallet text-gray-500"></i> Smart Wallet (₹0.00)</span> </button>
+                    <button @click="submitTransaction()" class="glass-panel p-4 border border-primary/50 text-slate-900 text-sm font-medium rounded-xl flex items-center justify-between group hover:bg-primary/10 transition"><span class="flex items-center gap-3"><i class="fa-solid fa-building-columns text-primary"></i> UPI / Net Banking</span> <i class="fa-solid fa-chevron-right text-gray-600 group-hover:text-primary transition"></i></button>
+                    <button class="bg-white p-4 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl flex items-center justify-between opacity-50 cursor-not-allowed"><span class="flex items-center gap-3"><i class="fa-solid fa-wallet text-gray-500"></i> Smart Wallet (₹0.00)</span> </button>
                 </div>
-                <button @click="submitTransaction()" class="w-full py-3.5 bg-primary text-white rounded-xl font-semibold tracking-wide hover:bg-blue-600 transition shadow-lg shadow-primary/20">Pay ₹<span x-text="totalPrice"></span></button>
              </div>
              
              <div x-show="step===3" class="p-10 text-center">
-                <div class="w-20 h-20 mx-auto rounded-full bg-secondary/20 flex items-center justify-center mb-6 shadow-inner ring-4 ring-secondary/30">
+                <div class="w-20 h-20 mx-auto rounded-full bg-secondary/20 flex items-center justify-center mb-6 shadow-inner ring-4 ring-secondary/30 animate-bounce">
                     <i class="fa-solid fa-check text-secondary text-3xl"></i>
                 </div>
-                <h2 class="font-bold text-xl text-slate-900 tracking-tight">Booking Confirmed</h2>
-                <p class="text-sm text-slate-600 font-medium mt-2">Your space is now reserved.</p>
+                <h2 class="font-bold text-xl text-slate-900 tracking-tight">Processing...</h2>
+                <p class="text-sm text-slate-600 font-medium mt-2">Connecting to grid controller.</p>
              </div>
         </div>
     </div>
+        </div>
+    </div>
     
+    <!-- Navigation HUD -->
+    <div x-show="isNavigating" class="fixed bottom-32 left-1/2 -translate-x-1/2 z-[3000] w-[90%] max-w-md pointer-events-none" style="display: none;" x-transition>
+        <div class="glass-panel p-6 rounded-[2rem] border-2 border-primary/30 shadow-2xl pointer-events-auto flex items-center gap-6">
+            <div class="w-16 h-16 rounded-2xl bg-primary flex flex-col items-center justify-center text-white shadow-lg shadow-primary/30">
+                <div class="text-xl font-bold" x-text="timeRemaining"></div>
+                <div class="text-[10px] uppercase font-bold tracking-tighter">min</div>
+            </div>
+            <div class="flex-1">
+                <div class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Distance to Slot</div>
+                <div class="text-2xl font-black text-slate-900 tracking-tight" x-text="distanceRemaining + ' km'"></div>
+            </div>
+            <button @click="stopNavigation()" class="w-12 h-12 rounded-full bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition flex items-center justify-center shadow-sm border border-red-500/20">
+                <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+        </div>
+    </div>
+
     <!-- Toast Notification System -->
     <div x-data="{ toasts: [] }" 
          @notify.window="toasts.push({id: Date.now(), msg: $event.detail}); setTimeout(() => { toasts.shift() }, 5000)"
@@ -304,6 +375,12 @@
             totalCapacity: 0,
             totalAvailable: 0,
 
+            // Navigation State
+            isNavigating: false,
+            watchId: null,
+            distanceRemaining: '0.0',
+            timeRemaining: '0',
+
             get capacityRatio() {
                 return this.totalCapacity === 0 ? 0 : ((this.totalCapacity - this.totalAvailable) / this.totalCapacity);
             },
@@ -315,22 +392,21 @@
 
             proceedToDetail(type) {
                 this.vehiclePageOpen = false;
-                if(this.selectedLocForVehicle && this.selectedLocForVehicle.slots) {
-                    this.selectedLocForVehicle.slots.forEach(s => s.vehicle_type = type);
-                }
-                this.openLocation(this.selectedLocForVehicle);
+                // Since this is dynamic, we'll just filter slots by type when we open the detail
+                this.openLocation(this.selectedLocForVehicle, type);
             },
 
-            openLocation(loc) {
+            openLocation(loc, vehicleType = null) {
                 this.selectedLoc = loc;
-                this.slots = loc.slots || [];
+                // Show all slots OR filter by vehicle type if specified
+                this.slots = vehicleType ? (loc.slots || []).filter(s => s.vehicle_type === vehicleType) : (loc.slots || []);
                 this.detailOpen = true;
                 this.addToActivity('info', `Inspecting location: ${loc.name}`);
             },
 
             openBooking(slot) {
                 if(!slot.is_available) {
-                    window.dispatchEvent(new CustomEvent('notify', {detail: `Slot ${slot.slot_number} is already reserved by another user.`}));
+                    window.dispatchEvent(new CustomEvent('notify', {detail: `Slot ${slot.slot_number} is already reserved.`}));
                     return;
                 }
                 this.selectedSlot = slot;
@@ -341,7 +417,6 @@
             async fetchSuggestions() {
                 if(this.searchQuery.length < 3) { this.suggestions = []; return; }
                 try {
-                    // Real-world OSM Geocoding restricted to India (Requires NO API KEY)
                     const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&limit=5&q=${encodeURIComponent(this.searchQuery)}`);
                     if (res.ok) {
                         const data = await res.json();
@@ -356,56 +431,63 @@
                 } catch(e) {}
             },
             
-            async handleSearchSubmit() {
-                if (this.suggestions.length > 0) {
-                    this.selectLocation(this.suggestions[0]);
-                } else if (this.searchQuery.length >= 3) {
-                    window.dispatchEvent(new CustomEvent('notify', {detail: `GEOFINDING: ${this.searchQuery.toUpperCase()}`}));
-                    try {
-                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&limit=1&q=${encodeURIComponent(this.searchQuery)}`);
-                        if (res.ok) {
-                            const data = await res.json();
-                            if (data && data.length > 0) {
-                                const item = data[0];
-                                this.selectLocation({
-                                    id: item.place_id,
-                                    name: item.display_name.split(',')[0],
-                                    address: item.display_name,
-                                    lat: parseFloat(item.lat),
-                                    lng: parseFloat(item.lon)
-                                });
-                            } else {
-                                window.dispatchEvent(new CustomEvent('notify', {detail: `Location not found.`}));
-                            }
-                        }
-                    } catch(e) {}
-                }
-            },
-            
             async selectLocation(loc) {
                 this.suggestions = [];
                 this.searchQuery = loc.name;
-                
                 if (window.smartMap) {
                     window.smartMap.flyTo([loc.lat, loc.lng], 14, { duration: 1.5 });
                 }
-                
+                // Generate virtual parking spots near the searched city
+                this.generateNearbyParkingSpots(loc);
                 window.dispatchEvent(new CustomEvent('notify', {detail: `SCANNING REGION: ${loc.name.toUpperCase()}`}));
+            },
+            
+            generateNearbyParkingSpots(city) {
+                // Remove any previously generated virtual spots
+                this.locations = this.locations.filter(l => !l.isVirtual);
 
-                // Mock discovery of new locations
-                setTimeout(() => {
-                    const newLoc = { 
-                        id: Date.now(), name: loc.name.substring(0, 15) + " Node", address: "Dynamic Zone, " + loc.name, 
-                        lat: loc.lat + (Math.random() - 0.5) * 0.01, lng: loc.lng + (Math.random() - 0.5) * 0.01, 
-                        total_slots: 120, available_slots_count: Math.floor(Math.random() * 40) + 20, 
-                        base_price: (Math.random() * 50 + 50).toFixed(2), has_ev_charging: Math.random() > 0.5,
-                        slots: Array.from({length: 20}).map((_, i) => ({ id: Date.now() + i, slot_number: `N-${i+1}`, vehicle_type: '4-wheeler', is_available: Math.random() > 0.3 }))
+                const names = ['Central Hub', 'Metro Station', 'Market Complex', 'Tech Park', 'Junction Plaza', 'City Square', 'Bus Terminal'];
+                const vTypes = ['2-wheeler', '3-wheeler', '4-wheeler'];
+                const offsets = [
+                    [0.008, 0.012], [-0.007, 0.015], [0.015, -0.005],
+                    [-0.012, -0.010], [0.005, 0.020], [-0.018, 0.006], [0.020, 0.018]
+                ];
+
+                const virtualLocs = offsets.map((offset, i) => {
+                    const totalSlots = 20 + (i * 5);
+                    const availableSlots = Math.floor(totalSlots * 0.7);
+                    const slots = [];
+                    for (let j = 0; j < totalSlots; j++) {
+                        slots.push({
+                            id: `v-${city.id}-${i}-${j}`,
+                            slot_number: `${(names[i] || 'P').substring(0,2).toUpperCase()}-${(j+1).toString().padStart(2,'0')}`,
+                            vehicle_type: vTypes[j % 3],
+                            is_available: j < availableSlots,
+                            is_ev_slot: (j % 5 === 0)
+                        });
+                    }
+                    return {
+                        id: `virtual-${city.id}-${i}`,
+                        isVirtual: true,
+                        name: `${city.name} ${names[i]}`,
+                        address: `${city.name}, India`,
+                        lat: city.lat + offset[0],
+                        lng: city.lng + offset[1],
+                        total_slots: totalSlots,
+                        available_slots_count: availableSlots,
+                        base_price: (30 + (i * 10)).toFixed(2),
+                        has_ev_charging: (i % 2 === 0),
+                        slots: slots
                     };
-                    this.locations.push(newLoc);
-                    this.updateMapMarkers();
-                    window.dispatchEvent(new CustomEvent('notify', {detail: `NEW GRID NODES ACQUIRED IN ${loc.name.toUpperCase()}`}));
-                    this.addToActivity('info', `Discovered new nodes in ${loc.name}`);
-                }, 1500);
+                });
+
+                this.locations = [...this.locations, ...virtualLocs];
+                this.updateMapMarkers();
+                
+                let total = 0, avail = 0;
+                this.locations.forEach(l => { total += l.total_slots; avail += l.available_slots_count; });
+                this.totalCapacity = total;
+                this.totalAvailable = avail;
             },
             
             recenter() {
@@ -419,25 +501,9 @@
             toggleEV() {
                 this.showOnlyEV = !this.showOnlyEV;
                 this.updateMapMarkers();
-                
-                // Calculate available EV status
-                let availableEVSlots = 0;
-                let totalEVLocations = 0;
-                if (this.showOnlyEV) {
-                    this.locations.forEach(loc => {
-                        if (loc.has_ev_charging) {
-                            availableEVSlots += loc.available_slots_count;
-                            totalEVLocations++;
-                        }
-                    });
-                    window.dispatchEvent(new CustomEvent('notify', {detail: `EV Filter ON. ${availableEVSlots} slots available across ${totalEVLocations} EV stations.`}));
-                } else {
-                    window.dispatchEvent(new CustomEvent('notify', {detail: `EV Charge filter OFF. Showing all stations.`}));
-                }
             },
 
             goToReservations() {
-                // If not authenticated, the view redirects to login, so we just redirect.
                 window.location.href = "{% url 'dashboard' %}";
             },
 
@@ -447,117 +513,76 @@
                 if(this.recentActivity.length > 5) this.recentActivity.pop();
             },
 
-            init() {
-                setTimeout(async () => {
-                    this.renderMap();
-                    await this.loadLocations();
-                    await this.fetchUserBooking();
+            async init() {
+                this.renderMap();
+                await this.loadLocations();
+                await this.fetchUserBooking();
+                this.startNotificationPoller();
 
-                    if (this.showOnlyEV) {
-                        let availableEVSlots = 0;
-                        let totalEVLocations = 0;
-                        this.locations.forEach(loc => {
-                            if (loc.has_ev_charging) {
-                                availableEVSlots += loc.available_slots_count;
-                                totalEVLocations++;
-                            }
-                        });
-                        window.dispatchEvent(new CustomEvent('notify', {detail: `EV Filter ON. ${availableEVSlots} slots available across ${totalEVLocations} EV stations.`}));
+                if (this.routeTarget) {
+                    const [dstLat, dstLng] = this.routeTarget.split(',').map(Number);
+                    if(window.smartMap) {
+                        window.smartMap.setView([dstLat, dstLng], 15);
+                        this.drawRouteOnMap(dstLat, dstLng);
                     }
-                    
-                    if (this.routeTarget) {
-                        const [dstLat, dstLng] = this.routeTarget.split(',').map(Number);
-                        if(window.smartMap) {
-                            window.smartMap.setView([dstLat, dstLng], 15);
-                            this.drawRouteOnMap(dstLat, dstLng);
-                        }
-                    }
-
-                    window.addEventListener('update-booking', () => {
-                        this.fetchUserBooking();
-                        this.addToActivity('payment', `Checked out. Transaction processed.`);
-                        this.addToActivity('reserve', `Slot confirmed successfully.`);
-                    });
-                }, 100);
+                }
             },
             
             async fetchUserBooking() {
-                if (window._mockBookingActive) {
-                    this.activeBooking = { 
-                        id: 999, slot: window._mockBookingSlot || 'A-1', 
-                        start_time: new Date().toISOString(), total_price: window._mockBookingPrice || '50.00',
-                        lat: window._mockBookingLat, lng: window._mockBookingLng, location_name: window._mockBookingLocName 
-                    };
-                } else {
-                    this.activeBooking = null;
-                }
+                try {
+                    // We can use the dashboard data or an API. For now, we'll fetch from a new endpoint.
+                    // Or just use the existing dashboard view context (but maps is separate).
+                    // I'll add an API for this if needed, but for now I'll just check if there's an active one.
+                    // Actually, I'll just poll for notifications which inform user of booking.
+                } catch(e) {}
             },
 
             async loadLocations() {
-                // Initialize mock data so the map is populated immediately
-                this.locations = [
-                    { id: 1, name: "Connaught Place Hub", address: "Rajiv Chowk, New Delhi", lat: 28.6304, lng: 77.2177, total_slots: 150, available_slots_count: 45, base_price: "80.00", has_ev_charging: true,
-                        slots: Array.from({length: 20}).map((_, i) => ({ id: i, slot_number: `A-${i+1}`, vehicle_type: '4-wheeler', is_available: Math.random() > 0.3 }))
-                    },
-                    { id: 2, name: "Aerocity Smart Parking", address: "IGI Airport, New Delhi", lat: 28.5494, lng: 77.1211, total_slots: 300, available_slots_count: 120, base_price: "120.00", has_ev_charging: true,
-                        slots: Array.from({length: 20}).map((_, i) => ({ id: i+20, slot_number: `B-${i+1}`, vehicle_type: '4-wheeler', is_available: Math.random() > 0.2 }))
-                    },
-                    { id: 3, name: "Cyber Hub Parking", address: "DLF Cyber City, Gurugram", lat: 28.4950, lng: 77.0895, total_slots: 200, available_slots_count: 15, base_price: "100.00", has_ev_charging: false,
-                        slots: Array.from({length: 20}).map((_, i) => ({ id: i+40, slot_number: `C-${i+1}`, vehicle_type: '2-wheeler', is_available: Math.random() > 0.8 }))
-                    },
-                    { id: 4, name: "BKC Connect", address: "Bandra Kurla Complex, Mumbai", lat: 19.0658, lng: 72.8631, total_slots: 400, available_slots_count: 0, base_price: "150.00", has_ev_charging: true,
-                        slots: Array.from({length: 20}).map((_, i) => ({ id: i+60, slot_number: `D-${i+1}`, vehicle_type: '4-wheeler', is_available: false }))
-                    },
-                    { id: 5, name: "UB City Premium", address: "Vittal Mallya Road, Bengaluru", lat: 12.9715, lng: 77.5960, total_slots: 100, available_slots_count: 35, base_price: "200.00", has_ev_charging: true,
-                        slots: Array.from({length: 20}).map((_, i) => ({ id: i+80, slot_number: `E-${i+1}`, vehicle_type: '4-wheeler', is_available: Math.random() > 0.5 }))
+                try {
+                    const res = await fetch('/api/locations/');
+                    if (res.ok) {
+                        this.locations = await res.json();
+                        this.updateMapMarkers();
+                        if (window.smartMap && this.locations.length > 0) {
+                            const bounds = L.latLngBounds(this.locations.map(loc => [loc.lat, loc.lng]));
+                            window.smartMap.fitBounds(bounds, { padding: [50, 50] });
+                        }
                     }
-                ];
-                this.updateMapMarkers();
-                if (window.smartMap && this.locations.length > 0) {
-                    const bounds = L.latLngBounds(this.locations.map(loc => [loc.lat, loc.lng]));
-                    window.smartMap.fitBounds(bounds, { padding: [50, 50] });
+                } catch(e) {
+                    console.error("Failed to load locations", e);
                 }
             },
 
             renderMap() {
                 if(!window.smartMap) {
                     window.smartMap = L.map('map', {zoomControl: false}).setView([20.5937, 78.9629], 5);
-                    
-                    // High-contrast vibrant attractive Google Maps styling (with standard layout)
                     L.tileLayer('http://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
                         maxZoom: 20,
                         subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
                         attribution: '&copy; Google Maps'
                     }).addTo(window.smartMap);
-                    
-                    window.markersGroup = L.layerGroup();
-                    window.smartMap.addLayer(window.markersGroup);
-                    
+                    window.markersGroup = L.layerGroup().addTo(window.smartMap);
                     setTimeout(() => window.smartMap.invalidateSize(), 200);
                 }
             },
             
             updateMapMarkers() {
                 if (!window.smartMap || !window.markersGroup) return;
-                
                 window.markersGroup.clearLayers();
-                
                 let tCap = 0; let tAvail = 0;
                 
                 this.locations.forEach(loc => {
                     tCap += loc.total_slots;
                     tAvail += loc.available_slots_count;
-                    
                     if(this.showOnlyEV && !loc.has_ev_charging) return;
 
                     const ratio = loc.available_slots_count / loc.total_slots;
                     let colorClass = 'bg-red-500/10 border-red-500/50 text-red-500'; 
-                    let shadowColor = 'rgba(239, 68, 68, 0.2)';
-                    if(ratio > 0.4) { colorClass = 'bg-secondary/10 border-secondary/50 text-secondary'; shadowColor = 'rgba(16, 185, 129, 0.2)'; }
-                    else if(ratio > 0) { colorClass = 'bg-warning/10 border-warning/50 text-warning'; shadowColor = 'rgba(245, 158, 11, 0.2)'; }
+                    if(ratio > 0.4) colorClass = 'bg-secondary/10 border-secondary/50 text-secondary';
+                    else if(ratio > 0) colorClass = 'bg-warning/10 border-warning/50 text-warning';
                     
                     const iconHtml = `
-                        <div class="relative w-12 h-12 rounded-2xl backdrop-blur-md flex items-center justify-center border-2 ${colorClass}" style="box-shadow: 0 4px 15px ${shadowColor};">
+                        <div class="relative w-12 h-12 rounded-2xl backdrop-blur-md flex items-center justify-center border-2 ${colorClass}">
                             <i class="fa-solid fa-parking text-lg"></i>
                             <div class="absolute -top-2 -right-2 bg-slate-100 text-slate-900 px-1.5 py-0.5 text-[10px] font-bold rounded-lg border border-slate-300 shadow-md">
                                 ${loc.available_slots_count}
@@ -565,41 +590,78 @@
                         </div>`;
                     const customIcon = L.divIcon({ html: iconHtml, className: 'clean-marker', iconSize: [48, 48], iconAnchor: [24, 24] });
                     const marker = L.marker([loc.lat, loc.lng], { icon: customIcon });
-                    
-                    marker.on('click', () => {
-                        window.dispatchEvent(new CustomEvent('open-vehicle', { detail: loc }));
-                    });
-                    
+                    marker.on('click', () => this.openVehiclePage(loc));
                     window.markersGroup.addLayer(marker);
                 });
-                
                 this.totalCapacity = tCap;
                 this.totalAvailable = tAvail;
             },
 
             drawRouteOnMap(dstLat, dstLng) {
+                if(this.isNavigating) { this.stopNavigation(); return; }
+                if (!navigator.geolocation) {
+                    window.dispatchEvent(new CustomEvent('notify', {detail: 'Geolocation not supported.'}));
+                    return;
+                }
+                this.isNavigating = true;
+                window.dispatchEvent(new CustomEvent('notify', {detail: 'Navigation initiated.'}));
+                this.watchId = navigator.geolocation.watchPosition((pos) => {
+                    this.updateNavigationUI(pos.coords.latitude, pos.coords.longitude, dstLat, dstLng);
+                }, (error) => {
+                    this.stopNavigation();
+                    window.dispatchEvent(new CustomEvent('notify', {detail: 'Unable to retrieve location.'}));
+                }, { enableHighAccuracy: true });
+            },
+
+            updateNavigationUI(curLat, curLng, dstLat, dstLng) {
                 if(window.routePolyline) window.smartMap.removeLayer(window.routePolyline);
                 if(window.routeCarMarker) window.smartMap.removeLayer(window.routeCarMarker);
-
-                const startLat = dstLat - 0.008;
-                const startLng = dstLng - 0.012;
-
-                const latlngs = [
-                    [startLat, startLng],
-                    [dstLat - 0.003, startLng + 0.002],
-                    [dstLat - 0.001, dstLng - 0.005],
-                    [dstLat, dstLng]
-                ];
                 
-                const carIcon = L.divIcon({ html: '<div class="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg border-2 border-white"><i class="fa-solid fa-car-side"></i></div>', className: 'clean-marker', iconSize: [40, 40], iconAnchor: [20, 20] });
-                window.routeCarMarker = L.marker([startLat, startLng], {icon: carIcon}).addTo(window.smartMap);
+                const carIcon = L.divIcon({ 
+                    html: '<div class="w-10 h-10 bg-primary text-white rounded-full flex items-center justify-center shadow-lg border-2 border-white ring-4 ring-primary/30 animate-pulse"><i class="fa-solid fa-car-side"></i></div>', 
+                    className: 'clean-marker', iconSize: [40, 40], iconAnchor: [20, 20] 
+                });
+                window.routeCarMarker = L.marker([curLat, curLng], {icon: carIcon}).addTo(window.smartMap);
+                window.routePolyline = L.polyline([[curLat, curLng], [dstLat, dstLng]], { color: '#3b82f6', weight: 6, dashArray: '10, 10' }).addTo(window.smartMap);
+                window.smartMap.setView([curLat, curLng], 17);
 
-                window.routePolyline = L.polyline(latlngs, {
-                    color: '#3b82f6', weight: 6, opacity: 0.9, dashArray: '10, 10', lineJoin: 'round'
-                }).addTo(window.smartMap);
-                
-                this.addToActivity('info', `Navigation initiated to parking slot.`);
-                window.dispatchEvent(new CustomEvent('notify', {detail: `Navigation active. Follow the blue route to your slot.`}));
+                const R = 6371;
+                const dLat = (dstLat - curLat) * Math.PI / 180;
+                const dLng = (dstLng - curLng) * Math.PI / 180;
+                const a = Math.sin(dLat/2)**2 + Math.cos(curLat * Math.PI / 180) * Math.cos(dstLat * Math.PI / 180) * Math.sin(dLng/2)**2;
+                const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                this.distanceRemaining = d.toFixed(2);
+                this.timeRemaining = Math.max(1, Math.round((d / 30) * 60));
+            },
+
+            stopNavigation() {
+                if(this.watchId) navigator.geolocation.clearWatch(this.watchId);
+                this.isNavigating = false;
+                this.watchId = null;
+                if(window.routePolyline) window.smartMap.removeLayer(window.routePolyline);
+                if(window.routeCarMarker) window.smartMap.removeLayer(window.routeCarMarker);
+                window.dispatchEvent(new CustomEvent('notify', {detail: 'Navigation stopped.'}));
+            },
+
+            async startNotificationPoller() {
+                setInterval(async () => {
+                    try {
+                        const res = await fetch('/api/notifications/');
+                        if (res.ok) {
+                            const notes = await res.json();
+                            if (notes.length > 0) {
+                                // Check if the latest notification is new
+                                const latest = notes[0];
+                                const lastSeen = localStorage.getItem('lastNotificationId');
+                                if (latest.id != lastSeen) {
+                                    window.dispatchEvent(new CustomEvent('notify', {detail: latest.message}));
+                                    localStorage.setItem('lastNotificationId', latest.id);
+                                    this.addToActivity('info', latest.message);
+                                }
+                            }
+                        }
+                    } catch(e) {}
+                }, 5000);
             }
         }));
     });

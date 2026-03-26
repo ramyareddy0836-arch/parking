@@ -33,17 +33,25 @@ class ParkingSlot(models.Model):
         return f"{self.location.name} - {self.slot_number}"
 
 class Booking(models.Model):
-    STATUS_CHOICES = (
-        ('active', 'Active'),
+    BOOKING_STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('confirmed', 'Confirmed'),
         ('completed', 'Completed'),
         ('cancelled', 'Cancelled')
+    )
+    PAYMENT_STATUS_CHOICES = (
+        ('unpaid', 'Unpaid'),
+        ('paid', 'Paid')
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='bookings')
     slot = models.ForeignKey(ParkingSlot, on_delete=models.CASCADE, related_name='bookings')
     start_time = models.DateTimeField()
     duration_hours = models.IntegerField(default=1)
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    booking_status = models.CharField(max_length=20, choices=BOOKING_STATUS_CHOICES, default='pending')
+    payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='unpaid')
+    is_ev_selected = models.BooleanField(default=False)
+    ev_charge_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

@@ -32,17 +32,21 @@
 
     <!-- User View -->
     <div class="flex gap-4 mb-8 border-b border-slate-200 dark:border-white/5 pb-1">
-        <button @click="tab = 'active'" class="pb-3 text-sm font-bold tracking-widest uppercase transition-all" :class="tab === 'active' || tab === 'past' ? 'text-primary border-b-2 border-primary' : 'text-slate-400 hover:text-slate-900 dark:hover:text-white'">Reservations</button>
+        <button @click="tab = 'active'" class="pb-3 text-sm font-bold tracking-widest uppercase transition-all" :class="tab === 'active' ? 'text-primary border-b-2 border-primary' : 'text-slate-400 hover:text-slate-900 dark:hover:text-white'">Active Reservations</button>
+        <button @click="tab = 'past'" class="pb-3 text-sm font-bold tracking-widest uppercase transition-all" :class="tab === 'past' ? 'text-primary border-b-2 border-primary' : 'text-slate-400 hover:text-slate-900 dark:hover:text-white'">Past Activity</button>
         <button @click="tab = 'account'" class="pb-3 text-sm font-bold tracking-widest uppercase transition-all" :class="tab === 'account' ? 'text-primary border-b-2 border-primary' : 'text-slate-400 hover:text-slate-900 dark:hover:text-white'">Settings</button>
     </div>
 
     <!-- Active Reservations -->
     <div x-show="tab === 'active'" x-transition class="space-y-6">
-        {% if user_bookings %}
-            {% for booking in user_bookings %}
+        {% for booking in user_bookings %}
+             {% if booking.booking_status == 'confirmed' %}
             <div class="glass-panel p-8 rounded-[2rem] border border-slate-200 dark:border-white/5 shadow-lg relative overflow-hidden group">
-                <div class="absolute top-0 right-0 p-4">
-                    <span class="px-3 py-1 bg-slate-100 dark:bg-white/5 text-[10px] font-bold rounded-lg text-slate-500 uppercase tracking-widest border border-slate-200 dark:border-white/10">#{{ booking.id }}</span>
+                <div class="absolute top-0 right-0 p-4 flex gap-2">
+                    {% if booking.is_ev_selected %}
+                    <span class="px-3 py-1 bg-secondary/10 text-secondary text-[10px] font-bold rounded-lg uppercase border border-secondary/20"><i class="fa-solid fa-bolt mr-1"></i> EV Active</span>
+                    {% endif %}
+                    <span class="px-3 py-1 bg-primary/10 text-primary text-[10px] font-bold rounded-lg uppercase border border-primary/20">Active</span>
                 </div>
                 <div class="flex flex-col md:flex-row gap-8 items-start md:items-center">
                     <div class="w-20 h-20 rounded-2xl bg-primary/10 text-primary flex items-center justify-center text-3xl shadow-inner border border-primary/20">
@@ -51,12 +55,15 @@
                     <div class="flex-1">
                         <h3 class="text-xl font-bold text-slate-900 dark:text-white">Slot {{ booking.slot.slot_number }}</h3>
                         <p class="text-sm text-slate-500 font-medium mb-1">{{ booking.slot.location.name }}</p>
-                        <div class="flex items-center gap-3 mt-4">
+                        <div class="flex flex-wrap items-center gap-3 mt-4">
                             <div class="px-3 py-1.5 rounded-xl bg-slate-900/5 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-2">
                                 <i class="fa-regular fa-clock text-primary"></i> <span class="timer" data-start="{{ booking.start_time|date:'c' }}" data-hours="{{ booking.duration_hours }}">Calculating...</span>
                             </div>
                             <div class="px-3 py-1.5 rounded-xl bg-slate-900/5 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-[11px] font-bold text-slate-600 dark:text-slate-400">
-                                Total: ₹{{ booking.total_price }}
+                                Paid: ₹{{ booking.total_price }}
+                            </div>
+                            <div class="px-3 py-1.5 rounded-xl bg-slate-900/5 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                                Payment: <span class="{% if booking.payment_status == 'paid' %}text-secondary{% else %}text-warning{% endif %} uppercase ml-1">{{ booking.payment_status }}</span>
                             </div>
                         </div>
                     </div>
@@ -70,14 +77,39 @@
                     </div>
                 </div>
             </div>
-            {% endfor %}
-        {% else %}
+             {% endif %}
+        {% empty %}
         <div class="text-center py-20 glass-panel rounded-[2rem] border-2 border-dashed border-slate-200 dark:border-white/10">
             <div class="w-16 h-16 mx-auto rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center text-2xl text-slate-300 dark:text-slate-700 mb-4"><i class="fa-solid fa-parking"></i></div>
-            <h3 class="text-lg font-bold text-slate-400">No active bookings detected on the grid.</h3>
+            <h3 class="text-lg font-bold text-slate-400">No active bookings detected.</h3>
             <a href="{% url 'map_view' %}" class="mt-4 inline-block text-primary font-bold hover:underline">Provision Nearest Slot &rarr;</a>
         </div>
-        {% endif %}
+        {% endfor %}
+    </div>
+
+    <!-- Past Activity -->
+    <div x-show="tab === 'past'" x-transition class="space-y-4">
+        {% for booking in user_bookings %}
+            {% if booking.booking_status != 'confirmed' %}
+            <div class="glass-panel p-6 rounded-3xl border border-slate-200 dark:border-white/5 opacity-80 hover:opacity-100 transition-all">
+                <div class="flex items-center gap-6">
+                    <div class="w-12 h-12 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center text-slate-400">
+                        <i class="fa-solid fa-clock-rotate-left"></i>
+                    </div>
+                    <div class="flex-1">
+                        <h4 class="font-bold text-slate-900 dark:text-white">{{ booking.slot.location.name }}</h4>
+                        <p class="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">Slot {{ booking.slot.slot_number }} &bull; {{ booking.start_time|date:"d M Y, h:i A" }}</p>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-sm font-black text-slate-900 dark:text-white">₹{{ booking.total_price }}</div>
+                        <div class="text-[9px] font-bold uppercase text-slate-400">{{ booking.booking_status }}</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        {% empty %}
+        <div class="text-center py-10 text-slate-400 italic text-sm">No past records found.</div>
+        {% endfor %}
     </div>
 
     <!-- Account View -->

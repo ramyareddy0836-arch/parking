@@ -27,4 +27,7 @@ urlpatterns = [
     path('chatbot/', views.chatbot, name='chatbot'),
     path('accounts/', include('django.contrib.auth.urls')),
     path('register/', views.register, name='register'),
+    path('api/notifications/', views.get_notifications, name='get_notifications'),
+    path('api/locations/', views.get_locations, name='get_locations'),
+    path('api/bookings/create/', views.create_booking, name='create_booking'),
 ]

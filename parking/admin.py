@@ -18,8 +18,8 @@ class ParkingSlotAdmin(admin.ModelAdmin):
 
 @admin.register(Booking)
 class BookingAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'slot', 'start_time', 'duration_hours', 'status')
-    list_filter = ('status', 'start_time')
+    list_display = ('id', 'user', 'slot', 'start_time', 'duration_hours', 'booking_status', 'payment_status', 'is_ev_selected')
+    list_filter = ('booking_status', 'payment_status', 'is_ev_selected', 'start_time')
 
 @admin.register(Notification)
 class NotificationAdmin(admin.ModelAdmin):

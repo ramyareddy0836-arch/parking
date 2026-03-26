@@ -20,13 +20,27 @@
             Eliminate the stress of searching. Find, reserve, and navigate to your perfect parking spot in seconds with our AI-powered network.
         </p>
         
-        <div class="flex flex-col sm:flex-row items-center justify-center gap-6">
-            <a href="{% url 'map_view' %}" class="group relative px-10 py-5 bg-primary text-white font-bold rounded-2xl flex items-center gap-3 shadow-2xl shadow-primary/40 hover:scale-105 active:scale-95 transition-all overflow-hidden">
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-6" x-data="{ showAuthOptions: false }">
+            <button @click="showAuthOptions = true" class="group relative px-10 py-5 bg-primary text-white font-bold rounded-2xl flex items-center gap-3 shadow-2xl shadow-primary/40 hover:scale-105 active:scale-95 transition-all overflow-hidden" x-show="!showAuthOptions">
                 <div class="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
                 <i class="fa-solid fa-location-arrow group-hover:rotate-45 transition-transform"></i>
                 Get Started
-            </a>
-            <a href="{% url 'register' %}" class="px-10 py-5 bg-white/10 hover:bg-white/20 border border-white/20 font-bold rounded-2xl backdrop-blur-xl transition hover:scale-105 active:scale-95">
+            </button>
+            
+            <!-- Auth Selection Options -->
+            <div x-show="showAuthOptions" x-transition class="flex flex-col sm:flex-row gap-4 w-full max-w-lg">
+                <a href="{% url 'login' %}" class="flex-1 px-8 py-5 bg-primary text-white font-bold rounded-2xl text-center shadow-xl hover:bg-blue-600 transition hover:scale-105">
+                    <i class="fa-solid fa-right-to-bracket mr-2"></i> Sign In
+                </a>
+                <a href="{% url 'register' %}" class="flex-1 px-8 py-5 bg-white/10 hover:bg-white/20 border border-white/20 font-bold rounded-2xl backdrop-blur-xl transition hover:scale-105 text-center">
+                    <i class="fa-solid fa-user-plus mr-2"></i> Register
+                </a>
+                <button @click="showAuthOptions = false" class="px-5 py-5 bg-slate-800 text-white rounded-2xl hover:bg-slate-700 transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <a href="{% url 'register' %}" class="px-10 py-5 bg-white/10 hover:bg-white/20 border border-white/20 font-bold rounded-2xl backdrop-blur-xl transition hover:scale-105 active:scale-95" x-show="!showAuthOptions">
                 Join SmartPark
             </a>
         </div>
