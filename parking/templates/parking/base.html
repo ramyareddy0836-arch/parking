@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full antialiased">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartPark</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3B82F6', // blue-500
+                        secondary: '#10B981', // emerald-500
+                        warning: '#F59E0B', // amber-500
+                        dark: '#F8FAFC', 
+                        'dark-card': '#FFFFFF',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    
+    <!-- Mapping SDK (Leaflet Core wrapped over Google Tiles) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* Map Styles */
+        #map { height: 100%; width: 100%; z-index: 10; background: #F8FAFC; }
+        .leaflet-container { background: #F8FAFC !important; }
+        
+        /* Sophisticated Glass Panels */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            box-shadow: 0 10px 30px -10px rgba(0,0,0,0.1);
+        }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 4px; }
+    </style>
+</head>
+<body class="h-full bg-slate-50 text-slate-800 flex flex-col overflow-hidden select-none relative">
+    
+    <!-- Top Bar -->
+    <header class="absolute top-0 w-full z-[1000] pointer-events-none flex justify-between items-center p-6 pb-2">
+        <a href="{% url 'index' %}" class="glass-panel px-5 py-2.5 rounded-2xl flex items-center gap-3 pointer-events-auto shadow-xl hover:bg-white transition cursor-pointer">
+            <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold shadow-lg shadow-primary/30">
+                <i class="fa-solid fa-square-parking"></i>
+            </div>
+            <h1 class="text-lg font-bold text-slate-800 tracking-tight">SmartPark</h1>
+        </a>
+
+        <div class="glass-panel px-4 py-2 rounded-2xl flex items-center gap-4 pointer-events-auto shadow-xl">
+            {% if request.user.is_authenticated %}
+                <span class="text-sm font-medium text-slate-800">{{ request.user.username|title }}</span>
+                <form method="post" action="{% url 'logout' %}" class="inline">
+                    {% csrf_token %}
+                    <button type="submit" class="text-slate-500 hover:text-slate-800 transition text-sm flex items-center justify-center pt-1"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
+                </form>
+            {% else %}
+                <a href="{% url 'login' %}" class="text-sm font-medium text-slate-800 hover:text-primary transition">Sign In</a>
+                <a href="{% url 'register' %}" class="text-sm font-medium bg-primary text-white px-3 py-1.5 rounded-lg shadow-md shadow-primary/20 hover:bg-blue-600 transition">Register</a>
+            {% endif %}
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 w-full h-full relative z-0">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Bottom Nav -->
+    <nav class="absolute bottom-6 w-full z-[1000] pointer-events-none flex justify-center">
+        <div class="glass-panel rounded-3xl px-6 py-3 flex gap-6 items-center pointer-events-auto shadow-2xl">
+            <a href="{% url 'dashboard' %}" class="flex flex-col items-center gap-1.5 text-slate-500 hover:text-slate-900 transition w-16 group">
+                <i class="fa-solid fa-chart-pie text-lg group-hover:-translate-y-1 transition text-slate-600"></i>
+                <span class="text-[9px] font-bold tracking-wide uppercase">Dashboard</span>
+            </a>
+            <a href="{% url 'dashboard' %}?tab=active" class="flex flex-col items-center gap-1.5 text-slate-500 hover:text-slate-900 transition w-16 group">
+                <i class="fa-solid fa-calendar-check text-lg group-hover:-translate-y-1 transition text-slate-600"></i>
+                <span class="text-[9px] font-bold tracking-wide uppercase">Reserve</span>
+            </a>
+            <!-- Recenter Map -->
+            <a href="javascript:void(0)" @click="if(window.location.pathname === '{% url 'index' %}') { $dispatch('recenter-map') } else { window.location.href = '{% url 'index' %}' }" class="flex flex-col items-center gap-1.5 text-white transition group px-4 cursor-pointer outline-none hover:scale-105">
+                <div class="text-white w-12 h-12 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30 group-hover:bg-blue-600 transition">
+                    <i class="fa-solid fa-location-crosshairs text-xl"></i>
+                </div>
+            </a>
+            <a href="javascript:void(0)" @click="if(window.location.pathname === '{% url 'index' %}') { $dispatch('toggle-ev') } else { window.location.href = '{% url 'index' %}?ev=1' }" class="flex flex-col items-center gap-1.5 text-slate-500 hover:text-secondary transition w-16 group">
+                <i class="fa-solid fa-charging-station text-lg group-hover:-translate-y-1 transition text-slate-600 group-hover:text-secondary"></i>
+                <span class="text-[9px] font-bold tracking-wide uppercase">EV Charge</span>
+            </a>
+            <a href="{% url 'dashboard' %}?tab=account" class="flex flex-col items-center gap-1.5 text-slate-500 hover:text-slate-900 transition w-16 group">
+                <i class="fa-solid fa-user text-lg group-hover:-translate-y-1 transition text-slate-600"></i>
+                <span class="text-[9px] font-bold tracking-wide uppercase">Account</span>
+            </a>
+        </div>
+    </nav>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

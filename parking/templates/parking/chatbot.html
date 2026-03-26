@@ -1,0 +1,91 @@
+{% extends "parking/base.html" %}
+
+{% block content %}
+<div class="h-full w-full bg-slate-50 flex flex-col pt-20 pb-28 px-4 sm:max-w-3xl sm:mx-auto relative">
+
+    <div class="glass-panel w-full rounded-2xl flex items-center justify-between p-4 px-6 border border-slate-200">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xl shadow-inner">
+                <i class="fa-solid fa-robot"></i>
+            </div>
+            <div>
+                <h2 class="font-bold text-slate-900 text-lg">SmartPark Assistant</h2>
+                <p class="text-xs text-green-600 font-bold tracking-wide"><i class="fa-solid fa-circle text-[8px] mr-1"></i> ONLINE</p>
+            </div>
+        </div>
+        <a href="{% url 'index' %}" class="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-500 transition shadow-sm">
+            <i class="fa-solid fa-xmark"></i>
+        </a>
+    </div>
+
+    <!-- Chat Area -->
+    <div class="flex-1 overflow-y-auto mt-4 px-2 space-y-4" id="chatbox">
+        <!-- Message 1 -->
+        <div class="flex items-end gap-3">
+            <div class="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs shrink-0 shadow-sm"><i class="fa-solid fa-robot"></i></div>
+            <div class="bg-white px-5 py-3 rounded-2xl rounded-bl-sm shadow-sm border border-slate-100 text-sm text-slate-700 max-w-[80%]">
+                Hello {{ request.user.username|default:'there' }}! 👋 I'm the SmartPark AI Assistant. How can I help you clear your queries today?
+            </div>
+        </div>
+        
+    </div>
+
+    <!-- Input Area -->
+    <div class="mt-4 glass-panel rounded-full flex items-center p-2 shadow-2xl relative border border-slate-200">
+        <input type="text" id="chatInput" placeholder="Type your query here..." class="flex-1 bg-transparent px-4 border-none outline-none text-slate-800 text-sm placeholder-slate-400">
+        <button onclick="sendMessage()" class="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center shadow-md hover:bg-blue-600 transition">
+            <i class="fa-solid fa-paper-plane"></i>
+        </button>
+    </div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function sendMessage() {
+        const input = document.getElementById('chatInput');
+        const box = document.getElementById('chatbox');
+        if(!input.value.trim()) return;
+
+        // User message
+        const msg = document.createElement('div');
+        msg.className = "flex items-end gap-3 justify-end";
+        msg.innerHTML = `<div class="bg-primary text-white px-5 py-3 rounded-2xl rounded-br-sm shadow-md text-sm max-w-[80%]">${input.value.replace(/<\/?[^>]+(>|$)/g, "")}</div>`;
+        box.appendChild(msg);
+
+        // Auto reply
+        setTimeout(() => {
+            const reply = document.createElement('div');
+            reply.className = "flex items-end gap-3";
+            const lowerInput = input.value.toLowerCase();
+            let answer = "I'm sorry, I don't quite understand. Could you please rephrase your query?";
+            
+            if (lowerInput.includes('kalaburagi') || lowerInput.includes('gulbarga')) {
+                answer = "Yes! I currently see approximately 14 free parking slots available around the Kalaburagi zone. Please check the map for exact locations!";
+            } else if (lowerInput.includes('free') || lowerInput.includes('available') || lowerInput.includes('slot')) {
+                answer = "We have plenty of available slots across our active locations! You can see real-time availability directly on the map.";
+            } else if (lowerInput.includes('price') || lowerInput.includes('cost') || lowerInput.includes('fee')) {
+                answer = "Our parking tariffs typically start around ₹50.00/hr, but can vary depending on the location and whether it's an EV charging spot.";
+            } else if (lowerInput.includes('ev') || lowerInput.includes('charge') || lowerInput.includes('electric')) {
+                answer = "Yes! We support EV charging. You can simply hit the 'EV Charge' button on the map to filter for active charging stations.";
+            } else if (lowerInput.includes('hi') || lowerInput.includes('hello') || lowerInput.includes('hey')) {
+                answer = "Hello! I am the SmartPark AI. How can I assist you with your parking needs today?";
+            }
+
+            reply.innerHTML = `<div class="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs shrink-0 shadow-sm"><i class="fa-solid fa-robot"></i></div>
+            <div class="bg-white px-5 py-3 rounded-2xl rounded-bl-sm shadow-sm border border-slate-100 text-sm text-slate-700 max-w-[80%]">${answer}</div>`;
+            box.appendChild(reply);
+            box.scrollTop = box.scrollHeight;
+            input.value = '';
+        }, 800);
+
+        box.scrollTop = box.scrollHeight;
+    }
+
+    document.getElementById('chatInput').addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') sendMessage();
+    });
+</script>
+{% endblock %}
