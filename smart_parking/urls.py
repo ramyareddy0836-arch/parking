@@ -21,7 +21,9 @@ from parking import views
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', views.index, name='index'),
+    path('map/', views.map_view, name='map_view'),
     path('dashboard/', views.dashboard, name='dashboard'),
+    path('admin-dashboard/', views.admin_dashboard, name='admin_dashboard'),
     path('chatbot/', views.chatbot, name='chatbot'),
     path('accounts/', include('django.contrib.auth.urls')),
     path('register/', views.register, name='register'),

@@ -1,0 +1,607 @@
+{% extends "parking/base.html" %}
+
+{% block content %}
+<div x-data="parkingGrid()"
+     @open-detail.window="openLocation($event.detail)"
+     @open-vehicle.window="openVehiclePage($event.detail)"
+     @recenter-map.window="recenter()"
+     @toggle-ev.window="toggleEV()"
+     @show-reservations.window="goToReservations()"
+     @re-render-map.window="updateMapMarkers()"
+     class="w-full h-full relative">
+
+    <!-- Map Container -->
+    <div id="map" class="absolute inset-0 z-0"></div>
+
+    <!-- Left Panel (Active Reservation) -->
+    <div class="absolute top-28 left-6 z-10 w-80 flex flex-col gap-5 pointer-events-none hidden md:flex">
+        <div class="glass-panel p-6 rounded-3xl pointer-events-auto shadow-2xl">
+            <h2 class="text-xs font-semibold text-gray-500 tracking-widest mb-4 uppercase">Session Status</h2>
+            
+            <template x-if="activeBooking">
+                <div class="space-y-4">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-xl bg-primary/20 border border-primary/30 text-primary flex items-center justify-center text-xl shadow-inner">
+                            <i class="fa-solid fa-car"></i>
+                        </div>
+                        <div>
+                            <div class="text-sm font-semibold text-slate-900" x-text="'Slot ' + activeBooking.slot"></div>
+                            <div class="text-[11px] text-slate-600 font-medium tracking-wide">ACTIVE RESERVATION</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 pt-4 border-t border-slate-200">
+                        <div class="bg-slate-900/50 p-3 rounded-xl border border-slate-200">
+                            <div class="text-[9px] text-gray-500 uppercase tracking-widest mb-1">Start Time</div>
+                            <div class="text-sm font-semibold text-slate-800" x-text="new Date(activeBooking.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})"></div>
+                        </div>
+                        <div class="bg-slate-900/50 p-3 rounded-xl border border-slate-200">
+                            <div class="text-[9px] text-gray-500 uppercase tracking-widest mb-1">Cost</div>
+                            <div class="text-sm font-semibold text-slate-800" x-text="'₹' + activeBooking.total_price"></div>
+                        </div>
+                    <button @click="if(activeBooking.lat){ window.smartMap.setView([activeBooking.lat, activeBooking.lng], 15); drawRouteOnMap(activeBooking.lat, activeBooking.lng); } else { window.location.href='/dashboard/?tab=active'; }" class="w-full py-2.5 bg-primary/10 text-primary border border-primary/20 font-bold rounded-xl hover:bg-primary hover:text-white transition text-sm shadow-sm flex items-center justify-center gap-2"><i class="fa-solid fa-location-arrow"></i> Navigate to Spot</button>
+                </div>
+            </template>
+            <template x-if="!activeBooking">
+                <div class="flex flex-col items-center justify-center py-6">
+                    <div class="w-12 h-12 rounded-full bg-white text-gray-600 flex items-center justify-center text-xl mb-3"><i class="fa-solid fa-parking"></i></div>
+                    <div class="text-slate-600 text-sm font-medium">No active reservations</div>
+                    <button @click="recenter()" class="mt-3 text-xs text-primary hover:text-blue-400">Find Parking Nearby</button>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Right Panel (Stats & Activity) -->
+    <div class="absolute top-28 right-6 z-10 w-80 flex flex-col gap-5 pointer-events-none hidden md:flex">
+        <!-- System Availability -->
+        <div class="glass-panel p-6 rounded-3xl pointer-events-auto shadow-2xl">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xs font-semibold text-gray-500 tracking-widest uppercase">Network Capacity</h2>
+                <div class="text-[9px] font-bold px-2 py-0.5 rounded-full" :class="capacityRatio > 0.8 ? 'bg-red-500/20 text-red-400' : 'bg-secondary/20 text-secondary'" x-text="capacityRatio > 0.8 ? 'HIGH DEMAND' : 'OPTIMAL'"></div>
+            </div>
+            
+            <div class="flex items-end justify-between mb-2">
+                <div class="text-3xl font-bold text-slate-900"><span x-text="totalAvailable"></span><span class="text-sm font-medium text-gray-500 ml-1">/ <span x-text="totalCapacity"></span></span></div>
+            </div>
+            <div class="w-full h-1.5 bg-white rounded-full overflow-hidden mt-3">
+                <div class="h-full bg-primary transition-all duration-1000 rounded-full" :style="'width: ' + ((totalCapacity - totalAvailable) / Math.max(1, totalCapacity)*100) + '%;'"></div>
+            </div>
+        </div>
+
+        <!-- Real-Time Activity Graph/Logs -->
+        <div class="glass-panel p-6 rounded-3xl pointer-events-auto flex flex-col flex-1 max-h-[40vh] shadow-2xl">
+            <h2 class="text-xs font-semibold text-gray-500 tracking-widest mb-4 uppercase shrink-0">Live Activity</h2>
+            <div class="space-y-4 overflow-y-auto flex-1 pr-1 custom-scrollbar">
+                <template x-for="act in recentActivity" :key="act.id">
+                    <div x-transition class="flex items-start gap-3">
+                        <div class="mt-0.5 w-6 h-6 rounded-full flex items-center justify-center shrink-0 border"
+                             :class="act.type === 'reserve' ? 'bg-warning/10 border-warning/30 text-warning' : (act.type === 'payment' ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-white border-slate-300 text-slate-600')">
+                            <i class="fa-solid text-[9px]" :class="act.type === 'reserve' ? 'fa-bookmark' : (act.type === 'payment' ? 'fa-credit-card' : 'fa-info')"></i>
+                        </div>
+                        <div class="flex-1">
+                            <p class="text-[11px] font-medium text-slate-600 leading-tight" x-text="act.msg"></p>
+                            <span class="text-[9px] font-medium text-gray-500 uppercase tracking-wider" x-text="act.time"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Bar -->
+    <div class="absolute top-6 left-1/2 -translate-x-1/2 z-20 w-[450px] flex flex-col gap-2 pointer-events-auto hidden sm:flex">
+        <div class="glass-panel rounded-full flex items-center px-5 py-3 shadow-2xl">
+            <i class="fa-solid fa-search text-slate-600"></i>
+            <input type="text" x-model="searchQuery" @input.debounce.400ms="fetchSuggestions" @keydown.enter.prevent="handleSearchSubmit()" placeholder="Search any city or street in India..." class="bg-transparent border-none outline-none text-slate-900 text-sm w-full placeholder-gray-500 font-medium ml-3">
+            <button x-show="searchQuery.length > 0" @click="searchQuery = ''; suggestions = []" class="text-gray-500 hover:text-slate-900 transition"><i class="fa-solid fa-times"></i></button>
+        </div>
+        
+        <div x-show="suggestions.length > 0" @click.away="suggestions = []" class="glass-panel rounded-2xl mt-1 overflow-hidden shadow-2xl max-h-60 overflow-y-auto">
+            <template x-for="item in suggestions" :key="item.id">
+                <button @click="selectLocation(item)" class="w-full text-left px-5 py-3 border-b border-slate-200 hover:bg-slate-900/5 transition flex items-center gap-4">
+                    <div class="w-8 h-8 rounded-full bg-white flex items-center justify-center text-primary"><i class="fa-solid fa-location-dot text-xs"></i></div>
+                    <div>
+                        <div class="font-semibold text-slate-900 text-sm" x-text="item.name"></div>
+                        <div class="text-[11px] text-gray-500 font-medium" x-text="item.address"></div>
+                    </div>
+                </button>
+            </template>
+            <div x-show="suggestions.length === 0 && searchQuery.length >= 2" class="p-4 text-center text-sm text-gray-500">No locations found.</div>
+        </div>
+    </div>
+
+    <!-- Vehicle Selection Page Overlay -->
+    <div x-show="vehiclePageOpen && selectedLocForVehicle" class="fixed inset-0 z-[2500] flex items-center justify-center pointer-events-none bg-slate-50" x-transition.opacity style="display: none;">
+        <div class="w-full h-full max-w-4xl max-h-screen bg-slate-50 pointer-events-auto relative p-8 flex flex-col items-center justify-center text-center">
+            <button @click="vehiclePageOpen = false" class="absolute top-6 left-6 text-slate-400 hover:text-slate-900 transition w-10 h-10 flex items-center justify-center rounded-full bg-slate-200 hover:bg-slate-300"><i class="fa-solid fa-arrow-left text-lg"></i></button>
+            <h1 class="text-3xl font-bold text-slate-900 tracking-tight mb-2">Select Vehicle Type</h1>
+            <p class="text-slate-500 mb-12">Please specify your vehicle to view available parking slots.</p>
+            <div class="flex flex-col sm:flex-row gap-6 w-full max-w-2xl justify-center">
+                <button @click="proceedToDetail('2-wheeler')" class="flex-1 bg-white border-2 border-slate-200 hover:border-primary p-8 rounded-[2rem] shadow-sm hover:shadow-xl transition group flex flex-col items-center gap-4">
+                    <div class="w-20 h-20 rounded-full bg-primary/10 text-primary flex items-center justify-center text-4xl group-hover:scale-110 transition"><i class="fa-solid fa-motorcycle"></i></div>
+                    <h3 class="font-bold text-xl text-slate-800">Two Wheeler</h3>
+                </button>
+                <button @click="proceedToDetail('3-wheeler')" class="flex-1 bg-white border-2 border-slate-200 hover:border-primary p-8 rounded-[2rem] shadow-sm hover:shadow-xl transition group flex flex-col items-center gap-4">
+                    <div class="w-20 h-20 rounded-full bg-primary/10 text-primary flex items-center justify-center text-4xl group-hover:scale-110 transition"><i class="fa-solid fa-car-side"></i></div>
+                    <h3 class="font-bold text-xl text-slate-800">Three Wheeler</h3>
+                </button>
+                <button @click="proceedToDetail('4-wheeler')" class="flex-1 bg-white border-2 border-slate-200 hover:border-primary p-8 rounded-[2rem] shadow-sm hover:shadow-xl transition group flex flex-col items-center gap-4">
+                    <div class="w-20 h-20 rounded-full bg-primary/10 text-primary flex items-center justify-center text-4xl group-hover:scale-110 transition"><i class="fa-solid fa-car"></i></div>
+                    <h3 class="font-bold text-xl text-slate-800">Four Wheeler</h3>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dynamic Location Detail Panel (Sophisticated HUD) -->
+    <div x-show="detailOpen && selectedLoc" class="fixed inset-0 z-[2000] flex items-center justify-center pointer-events-none" style="display: none;">
+        <div x-show="detailOpen" x-transition.opacity class="absolute inset-0 bg-slate-50/80 backdrop-blur-md pointer-events-auto" @click="detailOpen = false"></div>
+        <div x-show="detailOpen" x-transition class="glass-panel w-full max-w-4xl rounded-[2rem] p-8 pointer-events-auto relative max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-300">
+            <button @click="detailOpen = false" class="absolute top-6 right-6 text-slate-600 hover:text-slate-900 transition w-10 h-10 flex items-center justify-center rounded-full bg-slate-900/5 hover:bg-slate-900/10"><i class="fa-solid fa-xmark text-lg"></i></button>
+            
+            <template x-if="selectedLoc">
+                <div class="flex flex-col gap-8">
+                    <div class="pr-12">
+                        <h2 class="text-3xl font-bold text-slate-900 tracking-tight" x-text="selectedLoc.name"></h2>
+                        <div class="flex items-center gap-2 mt-2">
+                            <i class="fa-solid fa-location-dot text-primary text-sm"></i>
+                            <p class="text-slate-600 text-sm font-medium" x-text="selectedLoc.address"></p>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4">
+                        <div class="flex-1 bg-slate-900/50 rounded-2xl p-4 border border-slate-200 shadow-inner">
+                            <div class="text-[10px] text-gray-500 uppercase tracking-widest mb-1 font-semibold flex items-center gap-1"><i class="fa-solid fa-tag"></i> TARIFF</div>
+                            <div class="font-semibold text-xl text-slate-900">₹<span x-text="selectedLoc.base_price"></span><span class="text-gray-500 text-sm font-medium">/hr</span></div>
+                        </div>
+                        <div class="flex-1 bg-slate-900/50 rounded-2xl p-4 border border-slate-200 shadow-inner">
+                            <div class="text-[10px] text-gray-500 uppercase tracking-widest mb-1 font-semibold flex items-center gap-1"><i class="fa-solid fa-chart-pie"></i> CAPACITY</div>
+                            <div class="font-semibold text-xl text-slate-900"><span x-text="selectedLoc.available_slots_count"></span><span class="text-gray-500 text-sm font-medium px-1">/</span><span class="text-gray-500 text-sm font-medium" x-text="selectedLoc.total_slots"></span></div>
+                        </div>
+                        <div class="flex-1 rounded-2xl p-4 border transition shadow-inner" :class="selectedLoc.has_ev_charging ? 'border-secondary/30 bg-secondary/10' : 'bg-slate-900/50 border-slate-200'">
+                            <div class="text-[10px] uppercase tracking-widest mb-1 font-semibold flex items-center gap-1" :class="selectedLoc.has_ev_charging ? 'text-secondary/80' : 'text-gray-500'"><i class="fa-solid fa-bolt"></i> EV CHARGE</div>
+                            <div class="font-semibold text-xl text-slate-900">
+                                <span x-text="selectedLoc.has_ev_charging ? 'Available' : 'None'"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4">
+                        <a :href="'https://www.google.com/maps/dir/?api=1&destination=' + selectedLoc.lat + ',' + selectedLoc.lng" target="_blank"
+                           class="flex-1 py-3 bg-primary/10 border border-primary/30 text-primary hover:bg-primary text-white rounded-2xl text-center font-semibold transition shadow-md flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-diamond-turn-right text-lg"></i> Drive Here with Google Maps
+                        </a>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between items-end mb-4 border-b border-slate-200 pb-2">
+                            <h3 class="font-semibold text-slate-900 tracking-wide">Select Parking Space</h3>
+                            <span class="text-xs text-gray-500 font-medium hidden sm:block">Click an available spot to begin booking</span>
+                        </div>
+                        <div class="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-3">
+                            <template x-for="slot in slots" :key="slot.id">
+                                <button @click="openBooking(slot)" 
+                                        class="aspect-square rounded-2xl border flex flex-col items-center justify-center relative transition group shadow-sm"
+                                        :class="slot.is_available ? 'border-slate-200 bg-white/80 hover:bg-primary/20 hover:border-primary/50 text-slate-600 hover:text-slate-900 cursor-pointer hover:-translate-y-1' : 'border-red-500/10 text-red-400 bg-red-500/5 cursor-not-allowed opacity-50'"
+                                        :disabled="!slot.is_available">
+                                    <i class="fa-solid text-xl mb-1 transition group-hover:scale-110" :class="slot.vehicle_type === '2-wheeler' ? 'fa-motorcycle' : (slot.vehicle_type === '3-wheeler' ? 'fa-car-side' : 'fa-car')"></i>
+                                    <div class="text-[10px] font-semibold tracking-wide" x-text="slot.slot_number"></div>
+                                    
+                                    <!-- Explicit Reserved Stamp -->
+                                    <div x-show="!slot.is_available" class="absolute inset-0 bg-red-500/5 rounded-2xl flex items-center justify-center backdrop-blur-[0.5px]">
+                                        <div class="bg-red-500 text-white text-[9px] tracking-wider font-extrabold px-1.5 py-0.5 rounded shadow-sm rotate-[-15deg]">RESERVED</div>
+                                    </div>
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+    
+    <!-- Booking Modal (Sophisticated Glass) -->
+    <div x-show="bookingModalOpen" class="fixed inset-0 z-[3000] flex items-center justify-center pointer-events-none" style="display: none;">
+        <div x-show="bookingModalOpen" x-transition.opacity class="absolute inset-0 bg-slate-50/80 backdrop-blur-md pointer-events-auto" @click="bookingModalOpen = false"></div>
+        <div x-show="bookingModalOpen" x-transition class="glass-panel w-full max-w-sm rounded-[2rem] pointer-events-auto flex flex-col border border-slate-300 relative overflow-hidden shadow-2xl"
+             x-data="{
+                step: 1, duration: 1, date: new Date().toISOString().split('T')[0], time: '12:00',
+                get totalPrice() { return (selectedLoc?.base_price * this.duration).toFixed(2); },
+                async submitTransaction() {
+                    this.step = 3; 
+                    selectedSlot.is_available = false;
+                    if(selectedLoc.available_slots_count > 0) { selectedLoc.available_slots_count--; $dispatch('re-render-map'); }
+                    window._mockBookingActive = true;
+                    window._mockBookingSlot = selectedSlot.slot_number;
+                    window._mockBookingPrice = this.totalPrice;
+                    window._mockBookingLat = selectedLoc.lat;
+                    window._mockBookingLng = selectedLoc.lng;
+                    window._mockBookingLocName = selectedLoc.name;
+                    window.dispatchEvent(new CustomEvent('update-booking'));
+                    setTimeout(() => { bookingModalOpen = false; this.step = 1; detailOpen = false; }, 2500);
+                }
+             }" @open-booking.window="step = 1; duration = 1;">
+             
+             <div x-show="step===1" class="p-8">
+                <div class="text-center mb-8">
+                    <h2 class="text-xl font-bold text-slate-900 tracking-tight">Confirm Booking</h2>
+                    <p class="text-xs text-slate-600 font-medium mt-1">Spot <span class="text-primary font-bold" x-text="selectedSlot?.slot_number"></span></p>
+                </div>
+                <div class="gap-5 flex flex-col mb-8">
+                    <div>
+                        <label class="text-[10px] text-gray-500 uppercase tracking-widest font-semibold block mb-2">Duration (Hours)</label>
+                        <div class="flex items-center gap-4 bg-white/80 border border-slate-200 rounded-xl p-2 shadow-inner">
+                            <button @click="if(duration > 1) duration--" class="w-10 h-10 text-slate-600 hover:text-slate-900 hover:bg-slate-900/5 rounded-lg transition"><i class="fa-solid fa-minus"></i></button>
+                            <span class="flex-1 text-center font-semibold text-lg text-slate-900" x-text="duration"></span>
+                            <button @click="duration++" class="w-10 h-10 text-slate-600 hover:text-slate-900 hover:bg-slate-900/5 rounded-lg transition"><i class="fa-solid fa-plus"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-between items-end mb-8 bg-slate-900/50 p-4 rounded-xl border border-slate-200">
+                    <span class="text-[10px] text-gray-500 uppercase tracking-widest font-semibold">Total Cost</span>
+                    <span class="font-bold text-slate-900 text-2xl">₹<span x-text="totalPrice"></span></span>
+                </div>
+                <button @click="step=2" class="w-full py-3.5 bg-primary text-white rounded-xl font-semibold tracking-wide hover:bg-blue-600 transition shadow-lg shadow-primary/20">Proceed to Payment</button>
+             </div>
+             
+             <div x-show="step===2" class="p-8">
+                <div class="text-center mb-8">
+                    <h2 class="text-xl font-bold text-slate-900 tracking-tight">Select Payment</h2>
+                </div>
+                <div class="flex flex-col gap-3 mb-8">
+                    <button class="glass-panel p-4 border border-primary/50 text-slate-900 text-sm font-medium rounded-xl flex items-center justify-between group hover:bg-primary/10 transition"><span class="flex items-center gap-3"><i class="fa-solid fa-building-columns text-primary"></i> UPI / Net Banking</span> <i class="fa-solid fa-chevron-right text-gray-600 group-hover:text-primary transition"></i></button>
+                    <button class="bg-white p-4 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl flex items-center justify-between"><span class="flex items-center gap-3"><i class="fa-solid fa-wallet text-gray-500"></i> Smart Wallet (₹0.00)</span> </button>
+                </div>
+                <button @click="submitTransaction()" class="w-full py-3.5 bg-primary text-white rounded-xl font-semibold tracking-wide hover:bg-blue-600 transition shadow-lg shadow-primary/20">Pay ₹<span x-text="totalPrice"></span></button>
+             </div>
+             
+             <div x-show="step===3" class="p-10 text-center">
+                <div class="w-20 h-20 mx-auto rounded-full bg-secondary/20 flex items-center justify-center mb-6 shadow-inner ring-4 ring-secondary/30">
+                    <i class="fa-solid fa-check text-secondary text-3xl"></i>
+                </div>
+                <h2 class="font-bold text-xl text-slate-900 tracking-tight">Booking Confirmed</h2>
+                <p class="text-sm text-slate-600 font-medium mt-2">Your space is now reserved.</p>
+             </div>
+        </div>
+    </div>
+    
+    <!-- Toast Notification System -->
+    <div x-data="{ toasts: [] }" 
+         @notify.window="toasts.push({id: Date.now(), msg: $event.detail}); setTimeout(() => { toasts.shift() }, 5000)"
+         class="fixed top-24 right-5 z-[4000] flex flex-col gap-2 pointer-events-none">
+        <template x-for="toast in toasts" :key="toast.id">
+            <div x-transition class="glass-panel text-slate-900 px-5 py-4 rounded-xl shadow-2xl flex items-start gap-3 border border-slate-200 pointer-events-auto max-w-sm">
+                <i class="fa-solid fa-circle-info text-primary mt-0.5"></i>
+                <span x-text="toast.msg" class="text-xs font-medium leading-relaxed"></span>
+            </div>
+        </template>
+    </div>
+
+    <!-- Chatbot Floating Button -->
+    <a href="{% url 'chatbot' %}" class="fixed bottom-24 right-6 w-14 h-14 bg-primary text-white rounded-full flex items-center justify-center shadow-2xl hover:bg-blue-600 transition z-[2000] cursor-pointer group hover:scale-105" title="SmartPark Assistant">
+        <i class="fa-solid fa-message text-2xl group-hover:animate-bounce"></i>
+    </a>
+</div>
+
+<script>
+    document.addEventListener('alpine:init', () => {
+        Alpine.data('parkingGrid', () => ({
+            vehiclePageOpen: false,
+            selectedLocForVehicle: null,
+            detailOpen: false,
+            selectedLoc: null,
+            bookingModalOpen: false,
+            selectedSlot: null,
+            slots: [],
+            searchQuery: '',
+            suggestions: [],
+            
+            locations: [],
+            activeBooking: null,
+            routeTarget: new URLSearchParams(window.location.search).get('route'),
+            recentActivity: [{id: 1, type: 'info', msg: 'System Interface Initialized', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}],
+            showOnlyEV: new URLSearchParams(window.location.search).get('ev') === '1',
+            totalCapacity: 0,
+            totalAvailable: 0,
+
+            get capacityRatio() {
+                return this.totalCapacity === 0 ? 0 : ((this.totalCapacity - this.totalAvailable) / this.totalCapacity);
+            },
+
+            openVehiclePage(loc) {
+                this.selectedLocForVehicle = loc;
+                this.vehiclePageOpen = true;
+            },
+
+            proceedToDetail(type) {
+                this.vehiclePageOpen = false;
+                if(this.selectedLocForVehicle && this.selectedLocForVehicle.slots) {
+                    this.selectedLocForVehicle.slots.forEach(s => s.vehicle_type = type);
+                }
+                this.openLocation(this.selectedLocForVehicle);
+            },
+
+            openLocation(loc) {
+                this.selectedLoc = loc;
+                this.slots = loc.slots || [];
+                this.detailOpen = true;
+                this.addToActivity('info', `Inspecting location: ${loc.name}`);
+            },
+
+            openBooking(slot) {
+                if(!slot.is_available) {
+                    window.dispatchEvent(new CustomEvent('notify', {detail: `Slot ${slot.slot_number} is already reserved by another user.`}));
+                    return;
+                }
+                this.selectedSlot = slot;
+                this.bookingModalOpen = true;
+                window.dispatchEvent(new CustomEvent('open-booking', { detail: slot }));
+            },
+            
+            async fetchSuggestions() {
+                if(this.searchQuery.length < 3) { this.suggestions = []; return; }
+                try {
+                    // Real-world OSM Geocoding restricted to India (Requires NO API KEY)
+                    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&limit=5&q=${encodeURIComponent(this.searchQuery)}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        this.suggestions = data.map(item => ({
+                            id: item.place_id,
+                            name: item.display_name.split(',')[0],
+                            address: item.display_name,
+                            lat: parseFloat(item.lat),
+                            lng: parseFloat(item.lon)
+                        }));
+                    }
+                } catch(e) {}
+            },
+            
+            async handleSearchSubmit() {
+                if (this.suggestions.length > 0) {
+                    this.selectLocation(this.suggestions[0]);
+                } else if (this.searchQuery.length >= 3) {
+                    window.dispatchEvent(new CustomEvent('notify', {detail: `GEOFINDING: ${this.searchQuery.toUpperCase()}`}));
+                    try {
+                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&limit=1&q=${encodeURIComponent(this.searchQuery)}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (data && data.length > 0) {
+                                const item = data[0];
+                                this.selectLocation({
+                                    id: item.place_id,
+                                    name: item.display_name.split(',')[0],
+                                    address: item.display_name,
+                                    lat: parseFloat(item.lat),
+                                    lng: parseFloat(item.lon)
+                                });
+                            } else {
+                                window.dispatchEvent(new CustomEvent('notify', {detail: `Location not found.`}));
+                            }
+                        }
+                    } catch(e) {}
+                }
+            },
+            
+            async selectLocation(loc) {
+                this.suggestions = [];
+                this.searchQuery = loc.name;
+                
+                if (window.smartMap) {
+                    window.smartMap.flyTo([loc.lat, loc.lng], 14, { duration: 1.5 });
+                }
+                
+                window.dispatchEvent(new CustomEvent('notify', {detail: `SCANNING REGION: ${loc.name.toUpperCase()}`}));
+
+                // Mock discovery of new locations
+                setTimeout(() => {
+                    const newLoc = { 
+                        id: Date.now(), name: loc.name.substring(0, 15) + " Node", address: "Dynamic Zone, " + loc.name, 
+                        lat: loc.lat + (Math.random() - 0.5) * 0.01, lng: loc.lng + (Math.random() - 0.5) * 0.01, 
+                        total_slots: 120, available_slots_count: Math.floor(Math.random() * 40) + 20, 
+                        base_price: (Math.random() * 50 + 50).toFixed(2), has_ev_charging: Math.random() > 0.5,
+                        slots: Array.from({length: 20}).map((_, i) => ({ id: Date.now() + i, slot_number: `N-${i+1}`, vehicle_type: '4-wheeler', is_available: Math.random() > 0.3 }))
+                    };
+                    this.locations.push(newLoc);
+                    this.updateMapMarkers();
+                    window.dispatchEvent(new CustomEvent('notify', {detail: `NEW GRID NODES ACQUIRED IN ${loc.name.toUpperCase()}`}));
+                    this.addToActivity('info', `Discovered new nodes in ${loc.name}`);
+                }, 1500);
+            },
+            
+            recenter() {
+                if(window.smartMap) {
+                    window.smartMap.flyTo([20.5937, 78.9629], 5, { duration: 1.5 }); 
+                }
+                window.dispatchEvent(new CustomEvent('notify', {detail: 'Search cleared. Recentered map.'}));
+                this.searchQuery = '';
+            },
+            
+            toggleEV() {
+                this.showOnlyEV = !this.showOnlyEV;
+                this.updateMapMarkers();
+                
+                // Calculate available EV status
+                let availableEVSlots = 0;
+                let totalEVLocations = 0;
+                if (this.showOnlyEV) {
+                    this.locations.forEach(loc => {
+                        if (loc.has_ev_charging) {
+                            availableEVSlots += loc.available_slots_count;
+                            totalEVLocations++;
+                        }
+                    });
+                    window.dispatchEvent(new CustomEvent('notify', {detail: `EV Filter ON. ${availableEVSlots} slots available across ${totalEVLocations} EV stations.`}));
+                } else {
+                    window.dispatchEvent(new CustomEvent('notify', {detail: `EV Charge filter OFF. Showing all stations.`}));
+                }
+            },
+
+            goToReservations() {
+                // If not authenticated, the view redirects to login, so we just redirect.
+                window.location.href = "{% url 'dashboard' %}";
+            },
+
+            addToActivity(type, msg) {
+                const timeStr = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                this.recentActivity.unshift({id: Date.now(), type, msg, time: timeStr });
+                if(this.recentActivity.length > 5) this.recentActivity.pop();
+            },
+
+            init() {
+                setTimeout(async () => {
+                    this.renderMap();
+                    await this.loadLocations();
+                    await this.fetchUserBooking();
+
+                    if (this.showOnlyEV) {
+                        let availableEVSlots = 0;
+                        let totalEVLocations = 0;
+                        this.locations.forEach(loc => {
+                            if (loc.has_ev_charging) {
+                                availableEVSlots += loc.available_slots_count;
+                                totalEVLocations++;
+                            }
+                        });
+                        window.dispatchEvent(new CustomEvent('notify', {detail: `EV Filter ON. ${availableEVSlots} slots available across ${totalEVLocations} EV stations.`}));
+                    }
+                    
+                    if (this.routeTarget) {
+                        const [dstLat, dstLng] = this.routeTarget.split(',').map(Number);
+                        if(window.smartMap) {
+                            window.smartMap.setView([dstLat, dstLng], 15);
+                            this.drawRouteOnMap(dstLat, dstLng);
+                        }
+                    }
+
+                    window.addEventListener('update-booking', () => {
+                        this.fetchUserBooking();
+                        this.addToActivity('payment', `Checked out. Transaction processed.`);
+                        this.addToActivity('reserve', `Slot confirmed successfully.`);
+                    });
+                }, 100);
+            },
+            
+            async fetchUserBooking() {
+                if (window._mockBookingActive) {
+                    this.activeBooking = { 
+                        id: 999, slot: window._mockBookingSlot || 'A-1', 
+                        start_time: new Date().toISOString(), total_price: window._mockBookingPrice || '50.00',
+                        lat: window._mockBookingLat, lng: window._mockBookingLng, location_name: window._mockBookingLocName 
+                    };
+                } else {
+                    this.activeBooking = null;
+                }
+            },
+
+            async loadLocations() {
+                // Initialize mock data so the map is populated immediately
+                this.locations = [
+                    { id: 1, name: "Connaught Place Hub", address: "Rajiv Chowk, New Delhi", lat: 28.6304, lng: 77.2177, total_slots: 150, available_slots_count: 45, base_price: "80.00", has_ev_charging: true,
+                        slots: Array.from({length: 20}).map((_, i) => ({ id: i, slot_number: `A-${i+1}`, vehicle_type: '4-wheeler', is_available: Math.random() > 0.3 }))
+                    },
+                    { id: 2, name: "Aerocity Smart Parking", address: "IGI Airport, New Delhi", lat: 28.5494, lng: 77.1211, total_slots: 300, available_slots_count: 120, base_price: "120.00", has_ev_charging: true,
+                        slots: Array.from({length: 20}).map((_, i) => ({ id: i+20, slot_number: `B-${i+1}`, vehicle_type: '4-wheeler', is_available: Math.random() > 0.2 }))
+                    },
+                    { id: 3, name: "Cyber Hub Parking", address: "DLF Cyber City, Gurugram", lat: 28.4950, lng: 77.0895, total_slots: 200, available_slots_count: 15, base_price: "100.00", has_ev_charging: false,
+                        slots: Array.from({length: 20}).map((_, i) => ({ id: i+40, slot_number: `C-${i+1}`, vehicle_type: '2-wheeler', is_available: Math.random() > 0.8 }))
+                    },
+                    { id: 4, name: "BKC Connect", address: "Bandra Kurla Complex, Mumbai", lat: 19.0658, lng: 72.8631, total_slots: 400, available_slots_count: 0, base_price: "150.00", has_ev_charging: true,
+                        slots: Array.from({length: 20}).map((_, i) => ({ id: i+60, slot_number: `D-${i+1}`, vehicle_type: '4-wheeler', is_available: false }))
+                    },
+                    { id: 5, name: "UB City Premium", address: "Vittal Mallya Road, Bengaluru", lat: 12.9715, lng: 77.5960, total_slots: 100, available_slots_count: 35, base_price: "200.00", has_ev_charging: true,
+                        slots: Array.from({length: 20}).map((_, i) => ({ id: i+80, slot_number: `E-${i+1}`, vehicle_type: '4-wheeler', is_available: Math.random() > 0.5 }))
+                    }
+                ];
+                this.updateMapMarkers();
+                if (window.smartMap && this.locations.length > 0) {
+                    const bounds = L.latLngBounds(this.locations.map(loc => [loc.lat, loc.lng]));
+                    window.smartMap.fitBounds(bounds, { padding: [50, 50] });
+                }
+            },
+
+            renderMap() {
+                if(!window.smartMap) {
+                    window.smartMap = L.map('map', {zoomControl: false}).setView([20.5937, 78.9629], 5);
+                    
+                    // High-contrast vibrant attractive Google Maps styling (with standard layout)
+                    L.tileLayer('http://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+                        maxZoom: 20,
+                        subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+                        attribution: '&copy; Google Maps'
+                    }).addTo(window.smartMap);
+                    
+                    window.markersGroup = L.layerGroup();
+                    window.smartMap.addLayer(window.markersGroup);
+                    
+                    setTimeout(() => window.smartMap.invalidateSize(), 200);
+                }
+            },
+            
+            updateMapMarkers() {
+                if (!window.smartMap || !window.markersGroup) return;
+                
+                window.markersGroup.clearLayers();
+                
+                let tCap = 0; let tAvail = 0;
+                
+                this.locations.forEach(loc => {
+                    tCap += loc.total_slots;
+                    tAvail += loc.available_slots_count;
+                    
+                    if(this.showOnlyEV && !loc.has_ev_charging) return;
+
+                    const ratio = loc.available_slots_count / loc.total_slots;
+                    let colorClass = 'bg-red-500/10 border-red-500/50 text-red-500'; 
+                    let shadowColor = 'rgba(239, 68, 68, 0.2)';
+                    if(ratio > 0.4) { colorClass = 'bg-secondary/10 border-secondary/50 text-secondary'; shadowColor = 'rgba(16, 185, 129, 0.2)'; }
+                    else if(ratio > 0) { colorClass = 'bg-warning/10 border-warning/50 text-warning'; shadowColor = 'rgba(245, 158, 11, 0.2)'; }
+                    
+                    const iconHtml = `
+                        <div class="relative w-12 h-12 rounded-2xl backdrop-blur-md flex items-center justify-center border-2 ${colorClass}" style="box-shadow: 0 4px 15px ${shadowColor};">
+                            <i class="fa-solid fa-parking text-lg"></i>
+                            <div class="absolute -top-2 -right-2 bg-slate-100 text-slate-900 px-1.5 py-0.5 text-[10px] font-bold rounded-lg border border-slate-300 shadow-md">
+                                ${loc.available_slots_count}
+                            </div>
+                        </div>`;
+                    const customIcon = L.divIcon({ html: iconHtml, className: 'clean-marker', iconSize: [48, 48], iconAnchor: [24, 24] });
+                    const marker = L.marker([loc.lat, loc.lng], { icon: customIcon });
+                    
+                    marker.on('click', () => {
+                        window.dispatchEvent(new CustomEvent('open-vehicle', { detail: loc }));
+                    });
+                    
+                    window.markersGroup.addLayer(marker);
+                });
+                
+                this.totalCapacity = tCap;
+                this.totalAvailable = tAvail;
+            },
+
+            drawRouteOnMap(dstLat, dstLng) {
+                if(window.routePolyline) window.smartMap.removeLayer(window.routePolyline);
+                if(window.routeCarMarker) window.smartMap.removeLayer(window.routeCarMarker);
+
+                const startLat = dstLat - 0.008;
+                const startLng = dstLng - 0.012;
+
+                const latlngs = [
+                    [startLat, startLng],
+                    [dstLat - 0.003, startLng + 0.002],
+                    [dstLat - 0.001, dstLng - 0.005],
+                    [dstLat, dstLng]
+                ];
+                
+                const carIcon = L.divIcon({ html: '<div class="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg border-2 border-white"><i class="fa-solid fa-car-side"></i></div>', className: 'clean-marker', iconSize: [40, 40], iconAnchor: [20, 20] });
+                window.routeCarMarker = L.marker([startLat, startLng], {icon: carIcon}).addTo(window.smartMap);
+
+                window.routePolyline = L.polyline(latlngs, {
+                    color: '#3b82f6', weight: 6, opacity: 0.9, dashArray: '10, 10', lineJoin: 'round'
+                }).addTo(window.smartMap);
+                
+                this.addToActivity('info', `Navigation initiated to parking slot.`);
+                window.dispatchEvent(new CustomEvent('notify', {detail: `Navigation active. Follow the blue route to your slot.`}));
+            }
+        }));
+    });
+</script>
+{% endblock %}
