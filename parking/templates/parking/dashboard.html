@@ -1,7 +1,7 @@
 {% extends "parking/base.html" %}
 
 {% block content %}
-<div class="h-full w-full bg-slate-50 dark:bg-dark p-4 sm:p-8 sm:max-w-6xl sm:mx-auto overflow-y-auto pb-32" x-data="dashboardController()">
+<div class="h-full w-full bg-slate-50 dark:bg-dark p-4 sm:p-8 sm:max-w-6xl sm:mx-auto overflow-y-auto pb-44" x-data="dashboardController()">
     
     <!-- Profile Header -->
     <div class="glass-panel rounded-[2.5rem] p-8 mb-8 flex flex-col sm:flex-row items-center gap-8 mt-4 sm:mt-0 shadow-xl border border-slate-200 dark:border-white/5 transition-all">
@@ -19,7 +19,7 @@
                 {% if is_staff %}
                 System Administrator &bull; SmartPark Core
                 {% else %}
-                <i class="fa-solid fa-crown text-warning"></i> Premium Grid Member &bull; 14 Bookings
+                <i class="fa-solid fa-crown text-warning"></i> Premium Grid Member &bull; {{ user_bookings.count }} Bookings
                 {% endif %}
             </p>
         </div>
@@ -39,8 +39,7 @@
 
     <!-- Active Reservations -->
     <div x-show="tab === 'active'" x-transition class="space-y-6">
-        {% for booking in user_bookings %}
-             {% if booking.booking_status == 'confirmed' %}
+        {% for booking in active_bookings %}
             <div class="glass-panel p-8 rounded-[2rem] border border-slate-200 dark:border-white/5 shadow-lg relative overflow-hidden group">
                 <div class="absolute top-0 right-0 p-4 flex gap-2">
                     {% if booking.is_ev_selected %}
@@ -77,7 +76,6 @@
                     </div>
                 </div>
             </div>
-             {% endif %}
         {% empty %}
         <div class="text-center py-20 glass-panel rounded-[2rem] border-2 border-dashed border-slate-200 dark:border-white/10">
             <div class="w-16 h-16 mx-auto rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center text-2xl text-slate-300 dark:text-slate-700 mb-4"><i class="fa-solid fa-parking"></i></div>
@@ -89,8 +87,7 @@
 
     <!-- Past Activity -->
     <div x-show="tab === 'past'" x-transition class="space-y-4">
-        {% for booking in user_bookings %}
-            {% if booking.booking_status != 'confirmed' %}
+        {% for booking in past_bookings %}
             <div class="glass-panel p-6 rounded-3xl border border-slate-200 dark:border-white/5 opacity-80 hover:opacity-100 transition-all">
                 <div class="flex items-center gap-6">
                     <div class="w-12 h-12 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center text-slate-400">
@@ -106,7 +103,6 @@
                     </div>
                 </div>
             </div>
-            {% endif %}
         {% empty %}
         <div class="text-center py-10 text-slate-400 italic text-sm">No past records found.</div>
         {% endfor %}
@@ -114,7 +110,8 @@
 
     <!-- Account View -->
     <div x-show="tab === 'account'" x-transition class="max-w-xl mx-auto space-y-6">
-        <div class="glass-panel p-8 rounded-[2rem] border border-slate-200 dark:border-white/5 shadow-xl">
+        <form method="post" action="{% url 'update_profile' %}" class="glass-panel p-8 rounded-[2rem] border border-slate-200 dark:border-white/5 shadow-xl">
+             {% csrf_token %}
              <h3 class="text-lg font-bold mb-6 text-slate-900 dark:text-white uppercase tracking-widest">Protocol Attributes</h3>
              <div class="space-y-4">
                 <div>
@@ -123,11 +120,11 @@
                 </div>
                 <div>
                     <label class="text-[10px] text-gray-500 uppercase font-extrabold tracking-widest pl-1">Communication Channel</label>
-                    <input type="email" value="{{ user.email }}" class="w-full mt-1.5 px-5 py-3 bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl outline-none focus:border-primary transition font-bold text-slate-900 dark:text-white">
+                    <input type="email" name="email" value="{{ user.email }}" class="w-full mt-1.5 px-5 py-3 bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl outline-none focus:border-primary transition font-bold text-slate-900 dark:text-white">
                 </div>
              </div>
-             <button class="w-full mt-8 py-4 bg-primary text-white font-bold rounded-2xl shadow-lg shadow-primary/30 hover:bg-blue-600 transition-all">Synchronize Changes</button>
-        </div>
+             <button type="submit" class="w-full mt-8 py-4 bg-primary text-white font-bold rounded-2xl shadow-lg shadow-primary/30 hover:bg-blue-600 transition-all">Synchronize Changes</button>
+        </form>
 
         <form method="post" action="{% url 'logout' %}" class="block">
             {% csrf_token %}

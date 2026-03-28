@@ -1,7 +1,9 @@
 from django.shortcuts import render, redirect
+from django import forms
 from django.contrib.auth import login, get_user_model
 from django.contrib.auth.forms import UserCreationForm
 from .models import ParkingLocation, ParkingSlot, Booking, Notification
+from .validators import validate_alphabetic, validate_social_username
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError
 from django.http import JsonResponse
@@ -12,6 +14,7 @@ import decimal
 def index(request):
     return render(request, 'parking/index.html')
 
+@login_required
 def map_view(request):
     return render(request, 'parking/map.html')
 
@@ -21,15 +24,48 @@ from django.db.models import Sum, Count, Q
 @login_required
 def dashboard(request):
     is_staff = request.user.is_staff
-    context = {
-        'is_staff': is_staff,
-    }
     if is_staff:
         return redirect('admin_dashboard')
     
-    context['user_bookings'] = Booking.objects.filter(user=request.user).order_by('-created_at')
-    context['notifications'] = Notification.objects.filter(user=request.user).order_by('-created_at')[:5]
+    # Update expired bookings
+    user_bookings = Booking.objects.filter(user=request.user)
+    now = timezone.now()
+    
+    for booking in user_bookings.filter(booking_status='confirmed'):
+        end_time = booking.start_time + timezone.timedelta(hours=booking.duration_hours)
+        if now > end_time:
+            booking.booking_status = 'completed'
+            booking.save()
+            # Also set slot to available if it was the last booking
+            booking.slot.is_available = True
+            booking.slot.save()
+
+    active_bookings = user_bookings.filter(booking_status='confirmed').order_by('-created_at')
+    past_bookings = user_bookings.exclude(booking_status='confirmed').order_by('-created_at')
+    notifications = Notification.objects.filter(user=request.user).order_by('-created_at')[:5]
+    
+    context = {
+        'is_staff': is_staff,
+        'user_bookings': user_bookings, # For count
+        'active_bookings': active_bookings,
+        'past_bookings': past_bookings,
+        'notifications': notifications,
+    }
     return render(request, 'parking/dashboard.html', context)
+
+@login_required
+def update_profile(request):
+    if request.method == 'POST':
+        email = request.POST.get('email')
+        if email:
+            request.user.email = email
+            request.user.save()
+            Notification.objects.create(
+                user=request.user,
+                message="Profile updated: Communication channel synchronized."
+            )
+        return redirect('dashboard')
+    return redirect('dashboard')
 
 @login_required
 def admin_dashboard(request):
@@ -75,14 +111,30 @@ def admin_dashboard(request):
     
     return render(request, 'parking/admin_dashboard.html', context)
 
+@login_required
 def chatbot(request):
     return render(request, 'parking/chatbot.html')
 
 
 class CustomUserCreationForm(UserCreationForm):
+    username = forms.CharField(
+        validators=[validate_social_username], 
+        required=True,
+        help_text="Usernames: 4–20 characters, letters, numbers, and underscores only. No spaces or periods."
+    )
+    first_name = forms.CharField(validators=[validate_alphabetic], required=True)
+    last_name = forms.CharField(validators=[validate_alphabetic], required=True)
+    email = forms.EmailField(required=True)
+
     class Meta(UserCreationForm.Meta):
         model = get_user_model()
         fields = UserCreationForm.Meta.fields + ('first_name', 'last_name', 'email')
+
+    def clean_email(self):
+        email = self.cleaned_data.get('email')
+        if get_user_model().objects.filter(email=email).exists():
+            raise forms.ValidationError("A user with this email already exists.")
+        return email
 
 def register(request):
     if request.method == 'POST':
@@ -95,7 +147,7 @@ def register(request):
                     user=user,
                     message="Welcome to SmartPark! Your account is active and ready for the grid."
                 )
-                login(request, user)
+                login(request, user, backend='parking.backends.EmailOrUsernameBackend')
                 return redirect('map_view')
             except IntegrityError:
                 form.add_error('username', 'A user with this username already exists.')

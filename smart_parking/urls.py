@@ -30,4 +30,5 @@ urlpatterns = [
     path('api/notifications/', views.get_notifications, name='get_notifications'),
     path('api/locations/', views.get_locations, name='get_locations'),
     path('api/bookings/create/', views.create_booking, name='create_booking'),
+    path('update-profile/', views.update_profile, name='update_profile'),
 ]

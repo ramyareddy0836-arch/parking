@@ -1,7 +1,7 @@
 {% extends "parking/base.html" %}
 
 {% block content %}
-<div class="h-full w-full flex items-center justify-center p-6 bg-[#0B0E14]">
+<div class="min-h-full w-full flex items-center justify-center p-6 pb-32 bg-[#0B0E14] overflow-y-auto">
     <div class="w-full max-w-md bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl">
         <div class="text-center mb-8">
             <h1 class="text-2xl font-semibold text-white tracking-tight">Create Account</h1>
@@ -15,6 +15,9 @@
             <div>
                 <label class="block text-xs font-medium text-gray-500 uppercase tracking-widest mb-1">{{ field.label }}</label>
                 {{ field }}
+                {% if field.help_text %}
+                <p class="text-gray-500 text-[10px] mt-1 italic">{{ field.help_text }}</p>
+                {% endif %}
                 {% if field.errors %}
                 <p class="text-red-400 text-xs mt-1">{{ field.errors.0 }}</p>
                 {% endif %}
